@@ -15,7 +15,7 @@ def parse_time(iso_input):
     if 'T' in clean:
         return datetime.strptime(clean, "%Y-%m-%dT%H:%M:%S")
     else:
-        return datetime.strptime(clean, "%Y-%m-%d")git add .
+        return datetime.strptime(clean, "%Y-%m-%d")
 
 def add_school_blocks(events, search_date, weekly_schedule):
     events_copy = events.copy()
