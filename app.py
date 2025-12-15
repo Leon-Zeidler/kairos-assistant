@@ -30,28 +30,31 @@ def save_json(f, d): json.dump(d, open(f, 'w'))
 def get_calendar_service():
     creds = None
     
-    # 1. Versuch: Lokale Datei (wie bisher auf deinem Mac)
+    # 1. Prio: Lokale Datei (Entwicklung)
     if os.path.exists('token.json'):
         creds = Credentials.from_authorized_user_file('token.json', SCOPES)
     
-    # 2. Versuch: Cloud Secrets (für Streamlit Cloud)
-    elif "token_json" in st.secrets:
-        # Wir laden die Infos aus dem geheimen Tresor der Cloud
+    # 2. Prio: Umgebungsvariable (Render / Server)
+    # Wir suchen nach einer Variable namens "GOOGLE_TOKEN_JSON"
+    elif os.getenv("GOOGLE_TOKEN_JSON"):
+        token_info = json.loads(os.getenv("GOOGLE_TOKEN_JSON"))
+        creds = Credentials.from_authorized_user_info(token_info, SCOPES)
+
+    # 3. Fallback: Streamlit Secrets (falls du doch Streamlit Cloud nutzt)
+    elif hasattr(st, "secrets") and "token_json" in st.secrets:
         token_info = json.loads(st.secrets["token_json"])
         creds = Credentials.from_authorized_user_info(token_info, SCOPES)
 
-    # Wenn wir immer noch keine gültigen Creds haben -> Login starten
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            # Achtung: Dieser Flow geht NUR lokal auf deinem Mac!
-            # Auf dem Server würde das crashen, deshalb ist der 'elif'-Teil oben wichtig.
+            # Das geht nur lokal!
             flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
             creds = flow.run_local_server(port=0)
         
-        # Nur lokal speichern, wenn wir auf dem Mac sind
-        if not os.path.exists("token.json") and "token_json" not in st.secrets:
+        # Nur lokal speichern
+        if not os.getenv("GOOGLE_TOKEN_JSON"):
             with open('token.json', 'w') as token:
                 token.write(creds.to_json())
             
