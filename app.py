@@ -6,7 +6,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
-from streamlit_calendar import calendar  # <--- NEU: Das Kalender-Modul
+from streamlit_calendar import calendar 
 
 # --- EIGENE MODULE ---
 import brain
@@ -94,11 +94,20 @@ def main():
     service = get_calendar_service()
     creds = service._http.credentials 
     
-    # DATEN LADEN (Cloud)
+    # DATEN LADEN
     default_schedule = {str(i): {'start':8,'end':14,'active':True} for i in range(5)}
     with st.spinner("Lade Kairos Gedächtnis..."):
         schedule = storage.load_from_drive(creds, 'schedule', default_schedule)
         tasks = storage.load_from_drive(creds, 'tasks', [])
+
+    # --- KATEGORIEN DEFINIEREN (Zentral) ---
+    CATEGORIES = {
+        "📚 Schule": "#d93025",  # Rot
+        "💻 Coding": "#1a73e8",  # Blau
+        "⚽ Sport": "#f9ab00",   # Gelb
+        "🏠 Haushalt": "#188038",# Grün
+        "✨ Sonstiges": "#616161" # Grau
+    }
 
     # HEADER
     now = datetime.datetime.now()
@@ -148,11 +157,23 @@ def main():
     for e in today_events:
         if 'start' not in e: continue
         
-        # Farben zuweisen
-        color = "#3788d8" # Standard Blau
-        if e.get('is_fake'): color = "#ff4b4b" # Rot (Schule)
-        elif "Kairos" in e.get('summary', ''): color = "#00c853" # Grün (KI)
-
+        # Standard Farbe
+        color = "#3788d8" 
+        
+        if e.get('is_fake'): 
+            color = "#ff4b4b" # Schule
+        elif "Kairos" in e.get('description', '') or "Kairos" in e.get('summary', ''): 
+            # Standard Grün für Kairos
+            color = "#00c853"
+            
+            # Intelligente Farb-Erkennung aus der Beschreibung!
+            # Wir prüfen, ob eine Kategorie in der Beschreibung steht
+            desc = e.get('description', '')
+            for cat_name, cat_color in CATEGORIES.items():
+                if cat_name in desc:
+                    color = cat_color
+                    break
+            
         calendar_events.append({
             "title": e['summary'],
             "start": e['start'].get('dateTime', e['start'].get('date')),
@@ -183,15 +204,25 @@ def main():
         with st.form("new_task_form", clear_on_submit=True):
             c1, c2 = st.columns([2,1])
             tn = c1.text_input("Titel")
-            td = c2.number_input("Min", value=45, step=15)
+            # Dropdown für Kategorie
+            cat = c2.selectbox("Kategorie", list(CATEGORIES.keys()))
+            
+            c3, c4 = st.columns([1,1])
+            td = c3.number_input("Min", value=45, step=15)
+            
             cc, cd = st.columns([1,2])
             use_dl = cc.checkbox("Deadline?")
             dl_date = cd.date_input("Bis", datetime.date.today() + datetime.timedelta(days=2))
             
-            if st.form_submit_button("➕"):
+            if st.form_submit_button("➕ Hinzufügen"):
                 if tn:
                     fdl = dl_date.strftime("%Y-%m-%d") if use_dl else None
-                    tasks.append({"name": tn, "duration": td, "deadline": fdl})
+                    tasks.append({
+                        "name": tn, 
+                        "duration": td, 
+                        "deadline": fdl,
+                        "category": cat
+                    })
                     storage.save_to_drive(creds, 'tasks', tasks)
                     st.rerun()
 
@@ -200,7 +231,11 @@ def main():
         
         for i, task in enumerate(tasks):
             dd = f"🚨 {task['deadline']}" if task.get('deadline') else ""
+            # Wir zeigen die Kategorie Farbe auch in der Liste an (als kleiner Punkt)
+            cat_label = task.get('category', '✨ Sonstiges')
+            
             with st.expander(f"{task['name']} ({task['duration']}m) {dd}"):
+                st.caption(f"Kategorie: {cat_label}")
                 c_b1, c_b2 = st.columns(2)
                 if c_b1.button("✨ Planen", key=f"p_{i}"):
                     with st.spinner("Suche Slot..."):
@@ -214,7 +249,7 @@ def main():
                     storage.save_to_drive(creds, 'tasks', tasks)
                     st.rerun()
 
-    # POPUP
+    # POPUP (BUCHUNG)
     if st.session_state.suggested_slot:
         st.divider()
         p = st.session_state.suggested_slot
@@ -222,18 +257,35 @@ def main():
             st.success(f"Vorschlag: {p['reason']}")
             st.info(f"📅 {p['new_start_time']} - {p['new_end_time']}")
             co, cn = st.columns(2)
+            
+            # --- HIER IST DEINE GEWÜNSCHTE BUCHUNGS-LOGIK ---
             if co.button("✅ Buchen"):
                 s = datetime.datetime.strptime(p['new_start_time'], "%Y-%m-%d %H:%M")
                 e = datetime.datetime.strptime(p['new_end_time'], "%Y-%m-%d %H:%M")
-                create_google_event(service, s, e, p['summary'], "Kairos Auto-Plan")
+                
+                # Kategorie holen
+                cat_name = "Allgemein"
+                if st.session_state.task_to_remove is not None:
+                     if st.session_state.task_to_remove < len(tasks):
+                        task_data = tasks[st.session_state.task_to_remove]
+                        cat_name = task_data.get('category', 'Allgemein')
+
+                desc_text = f"Kategorie: {cat_name} | Auto-Planned by Kairos"
+                
+                # Event erstellen mit der neuen Beschreibung
+                create_google_event(service, s, e, p['summary'], desc_text)
+                
+                # Aufräumen
                 if st.session_state.task_to_remove is not None:
                     if st.session_state.task_to_remove < len(tasks):
                         tasks.pop(st.session_state.task_to_remove)
                         storage.save_to_drive(creds, 'tasks', tasks)
                     st.session_state.task_to_remove = None
+                
                 st.session_state.suggested_slot = None
                 st.balloons()
                 st.rerun()
+                
             if cn.button("Abbrechen"):
                 st.session_state.suggested_slot = None
                 st.rerun()
@@ -250,7 +302,7 @@ def main():
             for m in ms:
                 st.write(f"📩 {m['subject']}")
                 if st.button("Als Task", key=m['subject']):
-                    tasks.append({"name": m['ai_data']['summary'], "duration": 60, "deadline": None})
+                    tasks.append({"name": m['ai_data']['summary'], "duration": 60, "deadline": None, "category": "✨ Sonstiges"})
                     storage.save_to_drive(creds, 'tasks', tasks)
 
 if __name__ == '__main__':
