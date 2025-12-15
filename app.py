@@ -6,15 +6,15 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
+from streamlit_calendar import calendar  # <--- NEU: Das Kalender-Modul
 
 # --- EIGENE MODULE ---
 import brain
 import planner
 import mail_agent
-import storage  # <--- NEU: Unser Cloud-Gedächtnis
+import storage 
 
 # --- KONFIGURATION ---
-# WICHTIG: Hier ist jetzt 'drive.file' dabei!
 SCOPES = [
     'https://www.googleapis.com/auth/calendar',
     'https://www.googleapis.com/auth/gmail.readonly',
@@ -26,42 +26,35 @@ st.set_page_config(page_title="Kairos", page_icon="⏳", layout="wide")
 if 'suggested_slot' not in st.session_state: st.session_state.suggested_slot = None
 if 'tasks' not in st.session_state: st.session_state.tasks = []
 
-# --- GOOGLE CONNECTION (Universal: Lokal + Render) ---
+# --- GOOGLE CONNECTION (Universal) ---
 def get_calendar_service():
     creds = None
-    
-    # 1. Lokal: Datei
     if os.path.exists('token.json'):
         creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-    
-    # 2. Render: Umgebungsvariable
     elif os.getenv("GOOGLE_TOKEN_JSON"):
         token_info = json.loads(os.getenv("GOOGLE_TOKEN_JSON"))
         creds = Credentials.from_authorized_user_info(token_info, SCOPES)
+    else:
+        try:
+            if st.secrets and "token_json" in st.secrets:
+                token_info = json.loads(st.secrets["token_json"])
+                creds = Credentials.from_authorized_user_info(token_info, SCOPES)
+        except: pass
 
-    # 3. Fallback: Streamlit Secrets
-    elif hasattr(st, "secrets") and "token_json" in st.secrets:
-        token_info = json.loads(st.secrets["token_json"])
-        creds = Credentials.from_authorized_user_info(token_info, SCOPES)
-
-    # Login starten falls ungültig
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            # Nur lokal möglich
             flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
             creds = flow.run_local_server(port=0)
         
-        # Speichern (nur lokal sinnvoll)
         if not os.getenv("GOOGLE_TOKEN_JSON"):
             with open('token.json', 'w') as token:
                 token.write(creds.to_json())
             
     return build('calendar', 'v3', credentials=creds)
 
-
-# --- HELPER FUNKTIONEN ---
+# --- HELPER ---
 def create_google_event(service, start_dt, end_dt, summary, desc=""):
     service.events().insert(calendarId='primary', body={
         'summary': summary, 'description': desc,
@@ -96,28 +89,23 @@ def collect_week_slots(service, schedule, start_date, days_to_scan=5):
         all_slots.extend(day_slots)
     return all_slots
 
-# --- HAUPTPROGRAMM ---
+# --- MAIN ---
 def main():
-    # 1. Service starten
     service = get_calendar_service()
-    # Wir brauchen die Credentials auch einzeln für Drive
     creds = service._http.credentials 
     
-    # 2. DATEN AUS CLOUD LADEN (Via Storage.py)
-    # Keine lokalen Files mehr, alles kommt aus Google Drive
+    # DATEN LADEN (Cloud)
     default_schedule = {str(i): {'start':8,'end':14,'active':True} for i in range(5)}
-    
-    # Drive Abfrage kann dauern, daher Spinner
     with st.spinner("Lade Kairos Gedächtnis..."):
         schedule = storage.load_from_drive(creds, 'schedule', default_schedule)
         tasks = storage.load_from_drive(creds, 'tasks', [])
 
-    # --- HEADER ---
+    # HEADER
     now = datetime.datetime.now()
     st.title("⏳ Kairos Hub")
     st.caption(f"Online Modus | {now.strftime('%H:%M')} Uhr")
 
-    # --- SIDEBAR (Stundenplan) ---
+    # SIDEBAR
     with st.sidebar:
         st.header("Einstellungen")
         with st.expander("🏫 Stundenplan"):
@@ -135,149 +123,135 @@ def main():
                 if schedule[k]['active'] != act:
                     schedule[k]['active'] = act
                     changed = True
-            
             if changed:
-                # SPEICHERN IN CLOUD
                 storage.save_to_drive(creds, 'schedule', schedule)
-                st.success("Plan in Drive gespeichert!")
+                st.success("Gespeichert!")
         
         if st.button("🔄 Sync Woche auf Handy"):
             n = sync_week_to_google(service, schedule, datetime.date.today())
             st.success(f"{n} Termine!")
 
-    # --- VIEW CONTROL ---
+    # VIEW SETUP
     col_d1, col_d2 = st.columns([1,3])
     with col_d1:
         view_date = st.date_input("Ansicht:", datetime.date.today())
     search_dt = datetime.datetime.combine(view_date, datetime.datetime.min.time())
 
-    # --- AGENDA DATEN ---
+    # EVENTS HOLEN
     t_min = search_dt.isoformat() + 'Z'
     t_max = (search_dt + datetime.timedelta(days=1)).isoformat() + 'Z'
     ev_res = service.events().list(calendarId='primary', timeMin=t_min, timeMax=t_max, singleEvents=True, orderBy='startTime').execute()
     today_events = brain.add_school_blocks(ev_res.get('items', []), search_dt, schedule)
     
-    # --- LAYOUT ---
-    c_left, c_right = st.columns(2)
+    # --- KALENDER VORBEREITEN ---
+    calendar_events = []
+    for e in today_events:
+        if 'start' not in e: continue
+        
+        # Farben zuweisen
+        color = "#3788d8" # Standard Blau
+        if e.get('is_fake'): color = "#ff4b4b" # Rot (Schule)
+        elif "Kairos" in e.get('summary', ''): color = "#00c853" # Grün (KI)
+
+        calendar_events.append({
+            "title": e['summary'],
+            "start": e['start'].get('dateTime', e['start'].get('date')),
+            "end": e['end'].get('dateTime', e['end'].get('date')),
+            "color": color,
+        })
+
+    cal_options = {
+        "headerToolbar": {"left": "today", "center": "title", "right": "timeGridDay,timeGridWeek"},
+        "initialView": "timeGridDay",
+        "initialDate": view_date.isoformat(),
+        "slotMinTime": "06:00:00",
+        "slotMaxTime": "22:00:00",
+        "height": 650,
+        "allDaySlot": False,
+    }
+
+    # --- LAYOUT ANZEIGE ---
+    c_left, c_right = st.columns([2, 1])
     
     with c_left:
-        st.subheader(f"📅 Agenda ({view_date.strftime('%d.%m.')})")
-        if not today_events: st.info("Alles frei.")
-        for e in today_events:
-            if 'start' not in e: continue
-            s = brain.parse_time(e['start'].get('dateTime', e['start'].get('date')))
-            end = brain.parse_time(e['end'].get('dateTime', e['end'].get('date')))
-            icon = "▪️"
-            if e.get('is_fake'): icon = "🏫"
-            elif "Kairos" in e.get('summary', ''): icon = "🤖"
-            st.write(f"{icon} **{s.strftime('%H:%M')} - {end.strftime('%H:%M')}** | {e['summary']}")
+        st.subheader("📅 Dein Tag")
+        calendar(events=calendar_events, options=cal_options)
 
     with c_right:
-        st.subheader("📝 Aufgaben Backlog")
+        st.subheader("📝 Aufgaben")
         
-        # --- NEUE AUFGABE FORMULAR ---
         with st.form("new_task_form", clear_on_submit=True):
-            st.write("Neue Aufgabe anlegen:")
-            col_in1, col_in2 = st.columns([2, 1])
-            new_name = col_in1.text_input("Titel", placeholder="z.B. Bio Referat")
-            new_duration = col_in2.number_input("Minuten", value=45, step=15)
+            c1, c2 = st.columns([2,1])
+            tn = c1.text_input("Titel")
+            td = c2.number_input("Min", value=45, step=15)
+            cc, cd = st.columns([1,2])
+            use_dl = cc.checkbox("Deadline?")
+            dl_date = cd.date_input("Bis", datetime.date.today() + datetime.timedelta(days=2))
             
-            col_check, col_date = st.columns([1, 2])
-            use_deadline = col_check.checkbox("Deadline?")
-            deadline_pick = col_date.date_input("Datum", datetime.date.today() + datetime.timedelta(days=2))
-            
-            if st.form_submit_button("➕ Hinzufügen"):
-                if new_name:
-                    final_deadline = None
-                    if use_deadline:
-                        final_deadline = deadline_pick.strftime("%Y-%m-%d")
-                    
-                    tasks.append({"name": new_name, "duration": new_duration, "deadline": final_deadline})
-                    # SPEICHERN IN CLOUD
+            if st.form_submit_button("➕"):
+                if tn:
+                    fdl = dl_date.strftime("%Y-%m-%d") if use_dl else None
+                    tasks.append({"name": tn, "duration": td, "deadline": fdl})
                     storage.save_to_drive(creds, 'tasks', tasks)
                     st.rerun()
 
         st.markdown("---")
+        if not tasks: st.caption("Leer.")
         
-        # --- TASK LISTE ---
-        if not tasks: st.caption("Keine offenen Aufgaben.")
         for i, task in enumerate(tasks):
-            deadline_display = f"🚨 {task['deadline']}" if task.get('deadline') else ""
-            title = f"{task['name']} ({task['duration']}m) {deadline_display}"
-            
-            with st.expander(title):
-                col_btn1, col_btn2 = st.columns(2)
-                
-                # PLANEN
-                if col_btn1.button("✨ Auto-Plan", key=f"plan_{i}"):
-                    with st.spinner("Prüfe Kalender..."):
-                        week_slots = collect_week_slots(service, schedule, datetime.datetime.now(), days_to_scan=5)
-                        proposal = planner.suggest_slot(
-                            f"{task['name']} ({task['duration']} min)", 
-                            week_slots,
-                            deadline_str=task.get('deadline')
-                        )
-                        st.session_state.suggested_slot = proposal
+            dd = f"🚨 {task['deadline']}" if task.get('deadline') else ""
+            with st.expander(f"{task['name']} ({task['duration']}m) {dd}"):
+                c_b1, c_b2 = st.columns(2)
+                if c_b1.button("✨ Planen", key=f"p_{i}"):
+                    with st.spinner("Suche Slot..."):
+                        ws = collect_week_slots(service, schedule, datetime.datetime.now(), 5)
+                        prop = planner.suggest_slot(f"{task['name']} ({task['duration']}m)", ws, task.get('deadline'))
+                        st.session_state.suggested_slot = prop
                         st.session_state.task_to_remove = i
                         st.rerun()
-                
-                # LÖSCHEN
-                if col_btn2.button("🗑️ Löschen", key=f"del_{i}"):
+                if c_b2.button("🗑️", key=f"d_{i}"):
                     tasks.pop(i)
-                    # SPEICHERN IN CLOUD
                     storage.save_to_drive(creds, 'tasks', tasks)
                     st.rerun()
 
-    # --- RESULT POPUP ---
+    # POPUP
     if st.session_state.suggested_slot:
         st.divider()
-        prop = st.session_state.suggested_slot
-        if prop.get("found"):
-            st.success(f"💡 Vorschlag: {prop['reason']}")
-            st.info(f"📅 **{prop['new_start_time']}** bis **{prop['new_end_time']}**")
-            
-            c_ok, c_no = st.columns(2)
-            if c_ok.button("✅ Buchen"):
-                s_dt = datetime.datetime.strptime(prop['new_start_time'], "%Y-%m-%d %H:%M")
-                e_dt = datetime.datetime.strptime(prop['new_end_time'], "%Y-%m-%d %H:%M")
-                create_google_event(service, s_dt, e_dt, prop['summary'], "Auto-Planned by Kairos")
-                
+        p = st.session_state.suggested_slot
+        if p.get("found"):
+            st.success(f"Vorschlag: {p['reason']}")
+            st.info(f"📅 {p['new_start_time']} - {p['new_end_time']}")
+            co, cn = st.columns(2)
+            if co.button("✅ Buchen"):
+                s = datetime.datetime.strptime(p['new_start_time'], "%Y-%m-%d %H:%M")
+                e = datetime.datetime.strptime(p['new_end_time'], "%Y-%m-%d %H:%M")
+                create_google_event(service, s, e, p['summary'], "Kairos Auto-Plan")
                 if st.session_state.task_to_remove is not None:
-                    idx = st.session_state.task_to_remove
-                    if idx < len(tasks): 
-                        tasks.pop(idx)
-                        # SPEICHERN IN CLOUD NACH BUCHUNG
+                    if st.session_state.task_to_remove < len(tasks):
+                        tasks.pop(st.session_state.task_to_remove)
                         storage.save_to_drive(creds, 'tasks', tasks)
                     st.session_state.task_to_remove = None
-                
                 st.session_state.suggested_slot = None
                 st.balloons()
                 st.rerun()
-                
-            if c_no.button("Abbrechen"):
+            if cn.button("Abbrechen"):
                 st.session_state.suggested_slot = None
                 st.rerun()
         else:
-            st.error(f"Nicht gefunden: {prop.get('reason')}")
+            st.error(p.get('reason'))
             if st.button("Ok"): 
                 st.session_state.suggested_slot = None
                 st.rerun()
-
-    # --- EMAIL ---
-    with st.expander("📧 Inbox Check"):
-        if st.button("Mails scannen"):
-            with st.spinner("Lese E-Mails..."):
-                new_meetings = mail_agent.fetch_unread_emails(creds)
-                if not new_meetings:
-                    st.info("Nichts gefunden.")
-                else:
-                    for mail in new_meetings:
-                        st.write(f"📩 {mail['subject']}")
-                        if st.button("Als Task anlegen", key=mail['subject']):
-                            tasks.append({"name": mail['ai_data']['summary'], "duration": 60, "deadline": None})
-                            # SPEICHERN IN CLOUD
-                            storage.save_to_drive(creds, 'tasks', tasks)
-                            st.success("Zur Liste hinzugefügt!")
+    
+    with st.expander("📧 Inbox"):
+        if st.button("Check"):
+            ms = mail_agent.fetch_unread_emails(creds)
+            if not ms: st.info("Leer.")
+            for m in ms:
+                st.write(f"📩 {m['subject']}")
+                if st.button("Als Task", key=m['subject']):
+                    tasks.append({"name": m['ai_data']['summary'], "duration": 60, "deadline": None})
+                    storage.save_to_drive(creds, 'tasks', tasks)
 
 if __name__ == '__main__':
     main()
