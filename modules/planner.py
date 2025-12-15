@@ -5,7 +5,7 @@ import json
 import datetime
 
 # --- WICHTIG: Hier startet die Verbindung ---
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def suggest_slot(user_task, free_slots_with_days, deadline_str=None):
