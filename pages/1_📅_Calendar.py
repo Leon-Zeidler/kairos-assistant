@@ -12,6 +12,22 @@ st.set_page_config(page_title="Calendar", page_icon="📅", layout="wide")
 # --- 1. CLEAN MODERN CSS (Professional SaaS Look) ---
 st.markdown("""
     <style>
+        /* --- HIDE STREAMLIT UI ELEMENTS (Menu, Header, Footer) --- */
+        header[data-testid="stHeader"] {
+            display: none;
+        }
+        div[data-testid="stDecoration"] {
+            display: none;
+        }
+        footer {
+            display: none;
+        }
+        
+        /* Das rückt den Inhalt nach oben, da der Header weg ist */
+        .block-container {
+            padding-top: 1rem !important;
+        }
+
         /* --- BACKGROUND & GLOBAL --- */
         .stApp {
             background-color: #0e1117; /* Deep Professional Dark */
@@ -25,18 +41,16 @@ st.markdown("""
         }
         
         /* --- MODERN INPUTS (No ugly grey borders) --- */
-        /* Wir machen die Inputs "Borderoless" mit leichtem Hintergrund - der "Modern Matte" Look */
         
         div[data-baseweb="select"] > div, 
         div[data-baseweb="input"] > div {
             background-color: rgba(255, 255, 255, 0.05) !important;
-            border: 1px solid rgba(255, 255, 255, 0.05) !important; /* Fast unsichtbarer Rand */
+            border: 1px solid rgba(255, 255, 255, 0.05) !important;
             border-radius: 8px !important;
             color: white !important;
             transition: all 0.2s ease;
         }
         
-        /* Focus State - Subtiler blauer Glow statt harter Rand */
         div[data-baseweb="select"] > div:focus-within,
         div[data-baseweb="input"] > div:focus-within {
             border-color: #3b82f6 !important;
@@ -48,14 +62,12 @@ st.markdown("""
             color: #e2e8f0 !important;
         }
         
-        /* Dropdown Menu Clean Up */
         ul[data-baseweb="menu"] {
             background-color: #1a1f2e !important;
             border: 1px solid rgba(255,255,255,0.1) !important;
             box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3) !important;
         }
         
-        /* Slider Modernisierung */
         div[data-baseweb="slider"] div[role="slider"] {
             background-color: white !important;
             box-shadow: 0 1px 3px rgba(0,0,0,0.3);
@@ -97,9 +109,6 @@ st.markdown("""
             background-color: #f1f5f9;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
         }
-        /* Secondary Button Style via Streamlit API logic fallback usually works, 
-           but here we keep primary white for cleanliness */
-
     </style>
 """, unsafe_allow_html=True)
 
@@ -179,14 +188,13 @@ for e in raw_events:
     elif 'Coding' in title: cat = 'coding'
     elif 'Kairos' in desc: cat = 'ai_planned'
     
-    # Clean Events: Solid Color, No Border
     cal_events.append({
         "id": e['id'],
         "title": title,
         "start": e['start'].get('dateTime', e['start'].get('date')),
         "end": e['end'].get('dateTime', e['end'].get('date')),
         "backgroundColor": COLORS.get(cat, COLORS['personal']),
-        "borderColor": "transparent", # Modern cleaner look
+        "borderColor": "transparent",
         "extendedProps": {"description": desc}
     })
 
@@ -205,7 +213,6 @@ for i in range(7):
         })
 
 # --- CLEAN CALENDAR CSS ---
-# Dies ist das CSS für den Kalender selbst (FullCalendar)
 calendar_css = """
     /* General Clean Up */
     .fc-theme-standard td, .fc-theme-standard th {
@@ -244,9 +251,9 @@ calendar_css = """
         border: none !important;
     }
     
-    /* Events - Modern Flat Style */
+    /* Events */
     .fc-event {
-        border-radius: 4px !important; /* Etwas eckiger = professioneller */
+        border-radius: 4px !important;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         padding: 2px 4px;
         font-weight: 500;
@@ -256,9 +263,9 @@ calendar_css = """
         opacity: 0.9;
     }
     
-    /* Current Time Indicator */
+    /* Red Line */
     .fc-timegrid-now-indicator-line {
-        border-color: #ef4444; /* Red line is standard for UX */
+        border-color: #ef4444; 
         border-width: 1px;
     }
     .fc-timegrid-now-indicator-arrow {
@@ -266,7 +273,7 @@ calendar_css = """
         border-width: 5px;
     }
     
-    /* Toolbar Buttons (Today, Next, Prev) */
+    /* Buttons */
     .fc-button-primary {
         background-color: rgba(255,255,255,0.05) !important;
         border: none !important;
@@ -301,14 +308,14 @@ cal = calendar(
         "locale": "en",
         "nowIndicator": True,
         "slotLabelFormat": {"hour": "numeric", "meridiem": "short", "hour12": True},
-        "dayHeaderFormat": {"weekday": "short", "day": "numeric"} # Clean format: "Mon 15"
+        "dayHeaderFormat": {"weekday": "short", "day": "numeric"}
     },
     custom_css=calendar_css,
     callbacks=['eventClick'],
     key='clean_calendar'
 )
 
-# --- CLEAN MODAL ---
+# --- OVERLAY ---
 @st.dialog("Event Details")
 def show_overlay(ev):
     st.markdown(f"""

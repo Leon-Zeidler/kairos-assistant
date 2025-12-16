@@ -3,192 +3,320 @@ import datetime
 from modules import storage, auth, brain, ui, audio
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Kairos OS", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="Kairos Command", page_icon="⚡", layout="wide")
 
-# --- SIDEBAR & ROUTING ---
-# Das rendert die Sidebar UND leitet automatisch weiter.
-# Wir speichern das Ergebnis in 'selected_page', falls wir es für Logik brauchen,
-# aber wir brauchen keinen if/elif Block mehr für switch_page.
+# --- 1. GLOBAL COMMAND CENTER CSS ---
+st.markdown("""
+    <style>
+        /* HIDE DEFAULT ELEMENTS */
+        header[data-testid="stHeader"], div[data-testid="stDecoration"], footer {display: none;}
+        
+        /* FULL MONITOR WIDTH & SPACING */
+        .block-container {
+            padding-top: 1.5rem !important;
+            padding-bottom: 2rem !important;
+            padding-left: 2rem !important;
+            padding-right: 2rem !important;
+            max-width: 100% !important; /* Stretch to full width */
+        }
+
+        /* --- GLOBAL THEME --- */
+        .stApp {
+            background-color: #09090b; /* Deep Black/Zinc */
+            color: #e4e4e7;
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* --- TEXT TYPOGRAPHY --- */
+        .sub-text { 
+            color: #71717a; 
+            font-size: 0.75rem; 
+            text-transform: uppercase; 
+            letter-spacing: 1.2px; 
+            font-weight: 600; 
+            margin-bottom: 10px;
+            display: block;
+        }
+        .hero-text { font-size: 3rem; font-weight: 800; color: white; letter-spacing: -1.5px; line-height: 1; }
+        .accent-text { color: #3b82f6; } 
+
+        /* --- UI BLOCKS (THE GRID) --- */
+        /* Einheits-Look für alle Panels */
+        .dashboard-panel {
+            background: rgba(255,255,255,0.02);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px;
+            padding: 20px;
+            height: 100%; /* Füllt die Spalte */
+        }
+
+        /* --- 1. STATUS BAR --- */
+        .status-bar-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(255,255,255,0.02);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 8px;
+            padding: 12px 25px;
+            margin-bottom: 20px;
+        }
+        .status-item { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; color: #a1a1aa; }
+        .status-value { color: #e4e4e7; font-weight: 600; font-family: monospace; font-size: 1rem; }
+        
+        /* --- 2. HERO FOCUS CARD --- */
+        .hero-card {
+            background: radial-gradient(circle at 50% 100%, rgba(59, 130, 246, 0.1) 0%, rgba(9, 9, 11, 0) 50%), 
+                        linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0) 100%);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 16px;
+            padding: 50px 20px;
+            text-align: center;
+            margin-bottom: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        /* --- 3. HABIT BARS --- */
+        .habit-row {
+            display: flex; align-items: center; justify-content: space-between;
+            background: rgba(0,0,0,0.3);
+            margin-bottom: 8px;
+            padding: 10px 15px;
+            border-radius: 8px;
+            border-left: 3px solid #27272a;
+            transition: all 0.2s;
+        }
+        .habit-row.done { border-left-color: #10b981; background: rgba(16, 185, 129, 0.05); }
+        .habit-name { font-size: 0.9rem; color: #e4e4e7; font-weight: 500; }
+        .habit-streak { font-size: 0.7rem; color: #71717a; font-family: monospace; }
+
+        /* --- 4. TIMELINE --- */
+        .timeline-item {
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .timeline-item:last-child { border-bottom: none; }
+        .timeline-time { 
+            font-family: monospace; 
+            font-size: 0.9rem; 
+            color: #71717a; 
+            min-width: 50px;
+        }
+        .timeline-content { font-size: 0.95rem; color: #d4d4d8; }
+        .timeline-active { color: #3b82f6; font-weight: 600; }
+        .timeline-past { opacity: 0.4; }
+
+        /* --- BUTTONS --- */
+        .stButton button {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: #d4d4d8;
+            border-radius: 8px;
+            height: 45px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .stButton button:hover {
+            border-color: #71717a;
+            background: rgba(255,255,255,0.1);
+            color: white;
+        }
+        /* Focus CTA */
+        .primary-cta button {
+            background: #2563eb !important;
+            border: 1px solid #3b82f6 !important;
+            color: white !important;
+            box-shadow: 0 0 20px rgba(37, 99, 235, 0.3);
+        }
+        .primary-cta button:hover {
+            box-shadow: 0 0 30px rgba(37, 99, 235, 0.5);
+            transform: scale(1.01);
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- 2. LOGIC & DATA PREP ---
 selected_page = ui.render_sidebar(active_page="Dashboard")
 
-# --- HELPER: HABIT TRACKER ---
-def load_habits(creds):
-    defaults = {
-        "📖 Reading (10m)": {},
-        "💧 Water (2L)": {},
-        "🏋️ Sport / Gym": {}
-    }
-    return storage.load_from_drive(creds, 'habits', defaults)
-
-def render_habit_tracker(creds):
-    habits = load_habits(creds)
-    today_str = datetime.date.today().isoformat()
-    
-    st.subheader("🔥 Habit Tracker")
-    
-    cols = st.columns(len(habits))
-    updated = False
-    
-    for i, (habit_name, history) in enumerate(habits.items()):
-        # Streak berechnen
-        streak = 0
-        check_date = datetime.date.today()
-        if not history.get(today_str, False):
-            check_date -= datetime.timedelta(days=1)
-            
-        while check_date.isoformat() in history and history[check_date.isoformat()]:
-            streak += 1
-            check_date -= datetime.timedelta(days=1)
-            
-        is_done = history.get(today_str, False)
-        
-        # Styles
-        bg = "rgba(16, 185, 129, 0.1)" if is_done else "rgba(255,255,255,0.03)"
-        border = "#10b981" if is_done else "rgba(255,255,255,0.1)"
-        text_c = "#10b981" if is_done else "#94a3b8"
-        icon = "🔥" if streak > 0 else "❄️"
-        
-        with cols[i]:
-            st.markdown(f"""
-            <div style="background:{bg}; border:1px solid {border}; border-radius:12px; padding:15px; text-align:center; transition: all 0.3s;">
-                <div style="font-weight:600; color:white; margin-bottom:5px; font-size:0.9rem;">{habit_name}</div>
-                <div style="font-size:1.8rem; font-weight:bold; color:white;">{icon} {streak}</div>
-                <div style="font-size:0.75rem; color:{text_c}; text-transform:uppercase; letter-spacing:1px;">Day Streak</div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            check_val = st.checkbox("Done", value=is_done, key=f"habit_{i}", label_visibility="collapsed")
-            if check_val != is_done:
-                habits[habit_name][today_str] = check_val
-                updated = True
-    
-    if updated:
-        storage.save_to_drive(creds, 'habits', habits)
-        st.rerun()
-
-# --- DASHBOARD VIEW ---
-# Wir zeigen das Dashboard nur an, wenn wir NICHT woanders hinnavigieren
 if selected_page == "Dashboard":
-    
-    # Auth & Data Load
+    # Data Loading
     creds = auth.get_creds()
-    tasks = storage.load_from_drive(creds, 'tasks', [])
     service = auth.get_service()
-
-    # Greeting Logic
+    tasks = storage.load_from_drive(creds, 'tasks', [])
+    
+    # Calc Metrics
+    open_tasks = [t for t in tasks if t.get('status') != 'completed']
+    open_count = len(open_tasks)
+    total_mins = sum([int(t.get('duration', 0)) for t in open_tasks])
+    
+    sorted_tasks = sorted([t for t in open_tasks if t.get('deadline')], key=lambda x: x['deadline'])
+    next_deadline = sorted_tasks[0]['name'] if sorted_tasks else "NONE"
+    
     hour = datetime.datetime.now().hour
-    greeting = "Good Morning" if hour < 12 else "Good Afternoon" if hour < 18 else "Good Evening"
+    greeting = "GOOD MORNING" if hour < 12 else "GOOD AFTERNOON" if hour < 18 else "GOOD EVENING"
     
-    # --- HEADER SECTION ---
-    c_head1, c_head2 = st.columns([3, 1])
-    with c_head1:
-        st.markdown(f"# {greeting}, Commander.")
-        st.markdown(f"<p style='color: #94a3b8; margin-top: -15px;'>System online. Ready for command.</p>", unsafe_allow_html=True)
+    # --- LAYOUT ROW 1: HEADER & ACTIONS ---
+    c_head, c_btn = st.columns([3, 1], gap="large")
+    with c_head:
+        st.markdown(f"""
+            <div style="display:flex; align-items:center; gap:15px; margin-bottom: 5px;">
+                <span class="sub-text" style="margin:0; color:#10b981;">● SYSTEM ONLINE</span>
+                <span class="sub-text" style="margin:0;">V 3.0 STABLE</span>
+            </div>
+            <div style="font-size:2rem; font-weight:700; color:white; letter-spacing:-0.5px;">{greeting}, COMMANDER.</div>
+        """, unsafe_allow_html=True)
     
-    # --- AUDIO BRIEFING BUTTON ---
-    with c_head2:
-        if st.button("🔊 Play Briefing", use_container_width=True):
-            with st.spinner("Generating Audio Report..."):
-                # Daten sammeln für das Briefing
-                date_str = datetime.datetime.now().strftime("%A, %d %B")
-                open_tasks_count = len([t for t in tasks if t.get('status') != 'completed'])
-                
-                # Events holen
-                now = datetime.datetime.now()
-                t_min = now.replace(hour=0, minute=0).isoformat() + 'Z'
-                t_max = now.replace(hour=23, minute=59).isoformat() + 'Z'
-                day_events = service.events().list(calendarId='primary', timeMin=t_min, timeMax=t_max, singleEvents=True).execute().get('items', [])
-                
-                event_msg = f"You have {len(day_events)} events on your calendar."
-                if day_events:
-                    first = day_events[0]
-                    # Sicherstellen dass 'dateTime' existiert (bei ganztägigen Events gibt es nur 'date')
-                    start_raw = first['start'].get('dateTime', first['start'].get('date'))
-                    t = brain.parse_time(start_raw)
-                    event_msg += f" The first one is {first['summary']} at {t.strftime('%I:%M %p')}."
+    with c_btn:
+        st.markdown('<div class="primary-cta">', unsafe_allow_html=True)
+        if st.button("⚡ ENGAGE FOCUS MODE", use_container_width=True):
+            st.switch_page("pages/3_🔥_Focus.py")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-                # Text für TTS
-                speech_text = f"""
-                {greeting}. Today is {date_str}. 
-                Here is your status report. 
-                {event_msg}
-                You currently have {open_tasks_count} active missions waiting. 
-                All systems are nominal. Good luck.
-                """
-                
-                # Audio generieren
-                audio_path = audio.generate_audio_briefing(speech_text)
-                if audio_path:
-                    st.audio(audio_path, format="audio/mp3", autoplay=True)
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True) # Spacer
 
-    st.write("") 
+    # --- LAYOUT ROW 2: STATUS BAR (Full Width) ---
+    st.markdown(f"""
+    <div class="status-bar-container">
+        <div class="status-item"><span>⚡</span> <span>MISSIONS:</span> <span class="status-value">{open_count}</span></div>
+        <div class="status-item"><span>⏳</span> <span>LOAD:</span> <span class="status-value">{total_mins}m</span></div>
+        <div class="status-item"><span>🎯</span> <span>PRIORITY:</span> <span class="status-value">{next_deadline[:20]}</span></div>
+        <div class="status-item"><span>📆</span> <span>DATE:</span> <span class="status-value">{datetime.datetime.now().strftime('%b %d')}</span></div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    # --- KPI CARDS ---
-    open_tasks = len([t for t in tasks if t.get('status') != 'completed'])
-    total_mins = sum([int(t.get('duration', 0)) for t in tasks if t.get('status') != 'completed'])
+    # --- LAYOUT ROW 3: HERO FOCUS CARD (Full Width) ---
+    primary_task = sorted_tasks[0] if sorted_tasks else (open_tasks[0] if open_tasks else None)
     
-    sorted_tasks = sorted([t for t in tasks if t.get('deadline')], key=lambda x: x['deadline'])
-    dl_name = "No deadlines"
-    dl_info = "Clear"
-    if sorted_tasks:
-        dl_name = sorted_tasks[0]['name']
-        d = datetime.datetime.strptime(sorted_tasks[0]['deadline'], "%Y-%m-%d").date()
-        diff = (d - datetime.date.today()).days
-        dl_info = f"in {diff} days" if diff > 1 else "⚠️ Tomorrow" if diff == 1 else "🚨 TODAY"
+    if primary_task:
+        task_name = primary_task['name']
+        task_sub = f"{primary_task.get('duration', 30)} MIN • {primary_task.get('category', 'General')}"
+    else:
+        task_name = "ALL SYSTEMS CLEAR"
+        task_sub = "NO ACTIVE OBJECTIVES"
 
-    c1, c2, c3, c4 = st.columns(4)
-    with c1: st.markdown(ui.card("Open Tasks", str(open_tasks), "Pending", "⚡"), unsafe_allow_html=True)
-    with c2: st.markdown(ui.card("Workload", f"{total_mins}m", "Scheduled", "⏱️"), unsafe_allow_html=True)
-    with c3: st.markdown(ui.card("Priority", dl_name[:15]+"..." if len(dl_name)>15 else dl_name, dl_info, "🔥"), unsafe_allow_html=True)
-    with c4: st.markdown(ui.card("System Status", "Online", "V 2.3", "🟢"), unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="hero-card">
+        <div class="sub-text" style="color:#3b82f6; margin-bottom:15px;">CURRENT OBJECTIVE</div>
+        <div class="hero-text">{task_name}</div>
+        <div style="color:#71717a; margin-top:15px; font-weight:500; font-family:monospace;">{task_sub}</div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    st.markdown("---")
+    # --- LAYOUT ROW 4: MAIN GRID (Timeline Left, Habits Right) ---
+    # Hier nutzen wir Grid-Logik für perfektes Alignment
     
-    # --- HABIT TRACKER ---
-    render_habit_tracker(creds)
-    
-    st.markdown("---")
-    
-    # --- TIMELINE & QUICK ACTIONS ---
-    col_main, col_side = st.columns([2, 1], gap="large")
-    
-    with col_main:
-        st.subheader("📅 Timeline")
+    col_timeline, col_right = st.columns([1.5, 1], gap="medium")
+
+    # --- BLOCK 1: TIMELINE PANEL ---
+    with col_timeline:
+        # Wir starten den visuellen Container
+        st.markdown('<div class="dashboard-panel">', unsafe_allow_html=True)
+        st.markdown('<span class="sub-text">TIMELINE PROTOCOL</span>', unsafe_allow_html=True)
+        
+        # Timeline Logic
         now = datetime.datetime.now()
         t_min = now.replace(hour=0, minute=0).isoformat() + 'Z'
         t_max = now.replace(hour=23, minute=59).isoformat() + 'Z'
         events = service.events().list(calendarId='primary', timeMin=t_min, timeMax=t_max, singleEvents=True, orderBy='startTime').execute().get('items', [])
-        
+
         if not events:
-            st.info("🎉 Free day! No events scheduled.")
+            st.caption("No signals detected on timeline.")
         else:
             for e in events:
                 start = e['start'].get('dateTime', e['start'].get('date'))
                 if not start: continue
                 dt = brain.parse_time(start)
-                
-                # Timezone fix
                 is_past = dt < now.astimezone()
                 
-                opacity = "0.5" if is_past else "1.0"
-                border_color = "#3b82f6" if not is_past else "#475569"
-                time_str = dt.strftime('%I:%M %p')
+                # Styles calc
+                opacity_class = "timeline-past" if is_past else ""
+                active_style = "color:white;" if not is_past else ""
+                icon = "⚪" if is_past else "🔵"
                 
                 st.markdown(f"""
-                <div style="display: flex; gap: 15px; margin-bottom: 12px; opacity: {opacity}; align-items: center; background: rgba(255,255,255,0.03); padding: 12px; border-radius: 12px; border-left: 4px solid {border_color};">
-                    <div style="font-weight: 700; color: #fff; font-family: monospace; width: 80px;">{time_str}</div>
-                    <div style="color: #cbd5e1;">{e['summary']}</div>
-                </div>""", unsafe_allow_html=True)
+                <div class="timeline-item {opacity_class}">
+                    <div class="timeline-time">{dt.strftime('%H:%M')}</div>
+                    <div class="timeline-content" style="{active_style}">{e['summary']}</div>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        st.markdown('</div>', unsafe_allow_html=True) # End Panel
 
-    with col_side:
-        st.subheader("Quick Actions")
-        if st.button("🔥 Focus Mode", use_container_width=True):
-            st.switch_page("pages/3_🔥_Focus.py")
+    # --- BLOCK 2: RIGHT PANEL (Habits + Actions) ---
+    with col_right:
+        # Alles in EINEM Panel für saubere Kanten, oder zwei gestapelte?
+        # User wollte "Blocks". Wir machen EINEN großen Block für Habits und Actions zusammen, 
+        # damit die Höhe besser zur Timeline passt.
+        
+        st.markdown('<div class="dashboard-panel">', unsafe_allow_html=True)
+        
+        # 1. Habits
+        st.markdown('<span class="sub-text">DAILY ROUTINES</span>', unsafe_allow_html=True)
+        
+        def load_habits(creds):
+            defaults = {"📖 Reading (10m)": {}, "💧 Water (2L)": {}, "🏋️ Sport / Gym": {}}
+            return storage.load_from_drive(creds, 'habits', defaults)
+        
+        habits = load_habits(creds)
+        today_str = datetime.date.today().isoformat()
+        updated_habits = False
+
+        for h_name, h_data in habits.items():
+            is_done = h_data.get(today_str, False)
+            streak = 0
+            check_date = datetime.date.today()
+            if not is_done: check_date -= datetime.timedelta(days=1)
+            while check_date.isoformat() in h_data and h_data[check_date.isoformat()]:
+                streak += 1
+                check_date -= datetime.timedelta(days=1)
+
+            done_class = "done" if is_done else ""
             
-        st.write("")
-        if st.button("➕ Add Task", use_container_width=True):
-            st.switch_page("pages/2_📝_Tasks.py")
-            
-        st.write("")
-        with st.expander("💡 Daily Quote"):
-            st.caption('"The best way to predict the future is to create it."')
+            # Complex Layout inside Markdown via Streamlit Columns hack
+            c_h1, c_h2 = st.columns([5, 1])
+            with c_h1:
+                st.markdown(f"""
+                <div class="habit-row {done_class}">
+                    <span class="habit-name">{h_name}</span>
+                    <span class="habit-streak">🔥 {streak}</span>
+                </div>
+                """, unsafe_allow_html=True)
+            with c_h2:
+                # Align checkbox vertically roughly
+                st.markdown("<div style='margin-top: 8px;'></div>", unsafe_allow_html=True)
+                val = st.checkbox("Done", value=is_done, key=f"h_{h_name}", label_visibility="collapsed")
+                if val != is_done:
+                    habits[h_name][today_str] = val
+                    updated_habits = True
+        
+        if updated_habits:
+            storage.save_to_drive(creds, 'habits', habits)
+            st.rerun()
+
+        st.markdown("<div style='margin-top:30px; border-top:1px solid rgba(255,255,255,0.05); margin-bottom:20px;'></div>", unsafe_allow_html=True)
+
+        # 2. Quick Actions
+        st.markdown('<span class="sub-text">QUICK ACCESS</span>', unsafe_allow_html=True)
+        
+        qa1, qa2 = st.columns(2)
+        with qa1:
+            if st.button("➕ NEW TASK", use_container_width=True):
+                st.switch_page("pages/2_📝_Tasks.py")
+        with qa2:
+            if st.button("📥 INBOX", use_container_width=True):
+                st.switch_page("pages/7_📧_Inbox.py")
+        
+        st.markdown('</div>', unsafe_allow_html=True) # End Panel
+
+# --- ROUTING ---
+elif selected_page == "Calendar": st.switch_page("pages/1_📅_Calendar.py")
+elif selected_page == "Tasks": st.switch_page("pages/2_📝_Tasks.py")
+elif selected_page == "Focus": st.switch_page("pages/3_🔥_Focus.py")
+elif selected_page == "Inbox": st.switch_page("pages/7_📧_Inbox.py")
+elif selected_page == "Vault": st.switch_page("pages/6_🧠_Vault.py")
+elif selected_page == "Chat": st.switch_page("pages/4_💬_Chat.py")
+elif selected_page == "Settings": st.switch_page("pages/5_⚙️_Settings.py")
