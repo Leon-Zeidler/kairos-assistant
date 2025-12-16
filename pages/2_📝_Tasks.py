@@ -1,8 +1,10 @@
 import streamlit as st
+from modules import ui
 import datetime
 from modules import storage, auth, planner, brain, ui
 
-st.set_page_config(page_title="Aufgaben", page_icon="📝", layout="wide")
+st.set_page_config(page_title="Tasks", page_icon="📝", layout="wide")
+ui.render_sidebar("Tasks")
 ui.load_css()
 
 # --- HELPER: KALENDER SCAN ---
@@ -33,10 +35,10 @@ creds = auth.get_creds()
 tasks = storage.load_from_drive(creds, 'tasks', [])
 schedule = storage.load_from_drive(creds, 'schedule', {})
 
-st.title("Missions")
+st.title("Tasks")
 
 # --- NEUE AUFGABE ---
-with st.expander("➕ Create New Mission", expanded=False):
+with st.expander("➕ Create New Task", expanded=False):
     with st.form("new_task"):
         c1, c2 = st.columns([3, 1])
         name = c1.text_input("Title", placeholder="e.g. Study Math")
@@ -51,16 +53,16 @@ with st.expander("➕ Create New Mission", expanded=False):
         has_dl = c_dl1.checkbox("Deadline?")
         dl_date = c_dl2.date_input("Date")
         
-        if st.form_submit_button("Create Mission"):
+        if st.form_submit_button("Create Tasks"):
             # ... Save logic ... (status: pending)
-            st.success("Mission added!")
+            st.success("Tasks added!")
             st.rerun()
 
 st.write("")
 
 # --- LISTE ---
 if not tasks:
-    st.info("All clear. No active missions.")
+    st.info("All clear. No active tasks.")
 else:
     # State für aktiven Planungs-Vorschlag
     if 'proposal' not in st.session_state: st.session_state.proposal = None

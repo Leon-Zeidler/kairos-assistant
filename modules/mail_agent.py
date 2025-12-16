@@ -10,36 +10,105 @@ load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def get_gmail_service(creds):
-    """Startet den Gmail Dienst mit den gleichen Credentials wie der Kalender"""
     return build('gmail', 'v1', credentials=creds)
 
 def clean_body(html_content):
-    """Macht aus HTML-Salat lesbaren Text"""
+    """Dein Code: Macht aus HTML lesbaren Text"""
     soup = BeautifulSoup(html_content, 'html.parser')
     return soup.get_text()
 
-def analyze_email_with_ai(subject, body, sender):
-    """Fragt GPT, ob das ein Meeting ist"""
-    # Text kürzen, um Geld zu sparen (max 1000 Zeichen reichen meist)
-    short_body = body[:1000].replace("\n", " ")
+def get_email_body(service, msg_id):
+    """Lädt den vollen Text einer spezifischen Mail (nur bei Bedarf)"""
+    try:
+        txt = service.users().messages().get(userId='me', id=msg_id).execute()
+        
+        # Versuche Body zu finden (Plain oder HTML)
+        if 'parts' in txt['payload']:
+            # Nimm den ersten Part (meistens Text) oder HTML wenn nötig
+            parts = txt['payload']['parts']
+            data = None
+            for p in parts:
+                if p['mimeType'] == 'text/plain':
+                    data = p['body']['data']
+                    break
+            if not data and parts: # Fallback
+                data = parts[0]['body'].get('data')
+        else:
+            data = txt['payload']['body'].get('data')
+
+        if not data: return "(No content)"
+
+        byte_code = base64.urlsafe_b64decode(data)
+        # Decoding
+        try:
+            return clean_body(byte_code.decode("utf-8"))
+        except:
+            return clean_body(byte_code.decode("latin-1")) # Fallback Encoding
+            
+    except Exception as e:
+        return f"Error loading body: {str(e)}"
+
+def fetch_inbox_previews(creds, limit=10):
+    """
+    SCHNELL: Lädt nur Header (Sender, Betreff, Snippet).
+    Keine KI-Analyse hier, damit die App schnell lädt.
+    """
+    service = get_gmail_service(creds)
+    results = service.users().messages().list(userId='me', q='is:unread in:inbox', maxResults=limit).execute()
+    messages = results.get('messages', [])
     
+    email_list = []
+    if not messages: return []
+
+    for msg in messages:
+        # Nur Metadata für Speed
+        txt = service.users().messages().get(userId='me', id=msg['id'], format='metadata').execute()
+        headers = txt['payload']['headers']
+        
+        subject = next((h['value'] for h in headers if h['name'] == 'Subject'), "No Subject")
+        sender = next((h['value'] for h in headers if h['name'] == 'From'), "Unknown")
+        snippet = txt.get('snippet', '')
+        
+        email_list.append({
+            'id': msg['id'],
+            'sender': sender,
+            'subject': subject,
+            'snippet': snippet
+        })
+            
+    return email_list
+
+def analyze_email_task(creds, email_data):
+    """
+    Wird erst aufgerufen, wenn User auf "Create Task" klickt.
+    Lädt Body nach und fragt GPT.
+    """
+    service = get_gmail_service(creds)
+    full_body = get_email_body(service, email_data['id'])
+    
+    # Kürzen für Token-Limit
+    short_body = full_body[:2000].replace("\n", " ")
+
     prompt = f"""
-    ANALYSIERE DIESE EMAIL:
-    Von: {sender}
-    Betreff: {subject}
-    Inhalt: {short_body}
+    ANALYZE THIS EMAIL AND EXTRACT A TASK.
     
-    AUFGABE:
-    Handelt es sich hier um eine konkrete Anfrage für ein Meeting, Treffen oder einen Termin?
-    Falls ja, extrahiere die Daten. Falls nein (oder Newsletter/Spam), antworte mit found: false.
+    SENDER: {email_data['sender']}
+    SUBJECT: {email_data['subject']}
+    CONTENT: {short_body}
     
-    Antworte NUR als JSON:
+    INSTRUCTIONS:
+    1. Summarize into a short Task Title (English).
+    2. Estimate duration in minutes.
+    3. Categorize (School, Personal, Coding, Sport).
+    4. Estimate energy (low, mid, high).
+    5. Output JSON.
+    
+    JSON FORMAT:
     {{
-        "is_meeting": true,
-        "summary": "Titel für Kalender (z.B. Treffen mit Max)",
-        "duration_minutes": 60,
-        "date_hint": "Datum/Uhrzeit aus dem Text (z.B. 'Morgen 14 Uhr' oder 'Freitag')",
-        "reason": "Warum du glaubst, dass es ein Meeting ist"
+        "title": "Reply to Project X",
+        "duration": 15,
+        "category": "School",
+        "energy": "mid"
     }}
     """
     
@@ -50,55 +119,6 @@ def analyze_email_with_ai(subject, body, sender):
             response_format={"type": "json_object"}
         )
         return json.loads(response.choices[0].message.content)
-    except:
-        return {"is_meeting": False}
-
-def fetch_unread_emails(creds, limit=5):
-    """Holt die ungelesenen Mails"""
-    service = get_gmail_service(creds)
-    
-    # Suche nur im Posteingang nach ungelesenen Mails
-    results = service.users().messages().list(userId='me', q='is:unread', maxResults=limit).execute()
-    messages = results.get('messages', [])
-    
-    analyzed_emails = []
-    
-    if not messages:
-        return []
-
-    print(f"Scanne {len(messages)} ungelesene Mails...")
-    
-    for msg in messages:
-        # Details laden
-        txt = service.users().messages().get(userId='me', id=msg['id']).execute()
-        
-        # Header (Betreff & Absender) finden
-        headers = txt['payload']['headers']
-        subject = next((h['value'] for h in headers if h['name'] == 'Subject'), "Ohne Betreff")
-        sender = next((h['value'] for h in headers if h['name'] == 'From'), "Unbekannt")
-        
-        # Body dekodieren (Gmail schickt base64)
-        try:
-            if 'parts' in txt['payload']:
-                data = txt['payload']['parts'][0]['body']['data']
-            else:
-                data = txt['payload']['body']['data']
-                
-            byte_code = base64.urlsafe_b64decode(data)
-            body_text = clean_body(byte_code.decode("utf-8"))
-            
-            # KI Analyse
-            ai_result = analyze_email_with_ai(subject, body_text, sender)
-            
-            if ai_result.get('is_meeting'):
-                analyzed_emails.append({
-                    'sender': sender,
-                    'subject': subject,
-                    'ai_data': ai_result
-                })
-                
-        except Exception as e:
-            print(f"Fehler bei Mail {msg['id']}: {e}")
-            continue
-
-    return analyzed_emails
+    except Exception as e:
+        print(e)
+        return {"title": email_data['subject'], "duration": 15, "category": "Personal", "energy": "mid"}

@@ -1,9 +1,11 @@
 import streamlit as st
+from modules import ui
 import time
 import datetime
 from modules import storage, auth, ui
 
 st.set_page_config(page_title="Fokus", page_icon="🔥")
+ui.render_sidebar("Focus")
 ui.load_css()
 
 # --- STATE MANAGEMENT ---
