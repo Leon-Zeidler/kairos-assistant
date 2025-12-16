@@ -7,3 +7,4 @@ openai
 python-dotenv
 beautifulsoup4
 streamlit-calendar
+streamlit-option-menu

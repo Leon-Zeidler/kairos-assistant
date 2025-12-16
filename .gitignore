@@ -5,4 +5,5 @@ __pycache__/
 .env
 .DS_Store
 kairos_tasks.json
-kairos_schedule.json
+kairos_schedule.json.env
+.env

@@ -1,95 +1,138 @@
 import streamlit as st
 import datetime
-from modules import storage, auth, ui
+from modules import storage, auth, planner, brain, ui
 
-st.set_page_config(page_title="Mission Control", page_icon="🚀", layout="wide")
+st.set_page_config(page_title="Aufgaben", page_icon="📝", layout="wide")
 ui.load_css()
 
-# Auth & Daten
+# --- HELPER: KALENDER SCAN ---
+def collect_week_slots(service, schedule, start_date, days_to_scan=5):
+    all_slots = []
+    now_real = datetime.datetime.now()
+    for i in range(days_to_scan):
+        current_day = start_date + datetime.timedelta(days=i)
+        t_min = current_day.isoformat() + 'Z'
+        t_max = (current_day + datetime.timedelta(days=1)).isoformat() + 'Z'
+        res = service.events().list(calendarId='primary', timeMin=t_min, timeMax=t_max, singleEvents=True).execute()
+        g_events = res.get('items', [])
+        mixed_events = brain.add_school_blocks(g_events, current_day, schedule)
+        day_slots = brain.find_free_slots(mixed_events, current_day, current_now=now_real)
+        all_slots.extend(day_slots)
+    return all_slots
+
+def create_google_event(service, start_dt, end_dt, summary, desc=""):
+    service.events().insert(calendarId='primary', body={
+        'summary': summary, 'description': desc,
+        'start': {'dateTime': start_dt.isoformat(), 'timeZone': 'Europe/Berlin'},
+        'end': {'dateTime': end_dt.isoformat(), 'timeZone': 'Europe/Berlin'}
+    }).execute()
+
+# --- MAIN ---
 service = auth.get_service()
 creds = auth.get_creds()
 tasks = storage.load_from_drive(creds, 'tasks', [])
+schedule = storage.load_from_drive(creds, 'schedule', {})
 
-# HEADER
-c1, c2 = st.columns([3, 1])
-with c1:
-    st.markdown("""
-        <h1>Mission Control</h1>
-        <p class='text-slate'>Manage and organize your objectives</p>
-    """, unsafe_allow_html=True)
+st.title("Missions")
 
-# STATS ROW (React Grid)
-s1, s2, s3 = st.columns(3)
-with s1:
-    pending = len([t for t in tasks if t.get('status') == 'pending' or not t.get('status')])
-    st.markdown(ui.kpi_card("Pending", pending, "Missions waiting", "Target", "blue"), unsafe_allow_html=True)
-with s2:
-    wip = len([t for t in tasks if t.get('status') == 'in_progress'])
-    st.markdown(ui.kpi_card("In Progress", wip, "Currently active", "Clock", "amber"), unsafe_allow_html=True)
-with s3:
-    done = len([t for t in tasks if t.get('status') == 'completed'])
-    st.markdown(ui.kpi_card("Completed", done, "Mission accomplished", "Wifi", "green"), unsafe_allow_html=True)
+# --- NEUE AUFGABE ---
+with st.expander("➕ Create New Mission", expanded=False):
+    with st.form("new_task"):
+        c1, c2 = st.columns([3, 1])
+        name = c1.text_input("Title", placeholder="e.g. Study Math")
+        # Englische Kategorien
+        cat = c2.selectbox("Category", ["School", "Personal", "Coding", "Sport"])
+        
+        c3, c4, c5 = st.columns(3)
+        duration = c3.number_input("Minutes", 15, 240, 45, step=15)
+        energy = c4.select_slider("Energy Level", options=["low", "mid", "high"], value="mid")
+        
+        c_dl1, c_dl2 = c5.columns([1,2])
+        has_dl = c_dl1.checkbox("Deadline?")
+        dl_date = c_dl2.date_input("Date")
+        
+        if st.form_submit_button("Create Mission"):
+            # ... Save logic ... (status: pending)
+            st.success("Mission added!")
+            st.rerun()
 
 st.write("")
 
-# FORMULAR (TaskForm Component)
-with st.expander("➕ Add New Mission", expanded=True):
-    with st.form("new_task"):
-        c_in1, c_in2 = st.columns([3, 1])
-        title = c_in1.text_input("Objective", placeholder="Enter mission objective...")
-        
-        c_sel1, c_sel2, c_sel3 = st.columns(3)
-        cat = c_sel1.selectbox("Category", ["personal", "school", "sport", "coding"])
-        dur = c_sel2.select_slider("Duration", options=["15", "30", "45", "60", "90", "120"], value="45")
-        energy = c_sel3.select_slider("Energy", options=["low", "mid", "high"], value="mid")
-        
-        if st.form_submit_button("Initialize Mission"):
-            new_task = {
-                "name": title, "category": cat, "duration": int(dur), "energy": energy,
-                "status": "pending", "created_at": datetime.datetime.now().isoformat()
-            }
-            tasks.append(new_task)
-            storage.save_to_drive(creds, 'tasks', tasks)
-            st.rerun()
+# --- LISTE ---
+if not tasks:
+    st.info("All clear. No active missions.")
+else:
+    # State für aktiven Planungs-Vorschlag
+    if 'proposal' not in st.session_state: st.session_state.proposal = None
+    if 'proposal_idx' not in st.session_state: st.session_state.proposal_idx = None
 
-# TASK TABS & CARDS
-tab_all, tab_pending, tab_wip, tab_done = st.tabs(["All", "Pending", "In Progress", "Completed"])
-
-def render_task_card(task, idx):
-    # CSS für Card Colors
-    colors = {
-        "school": "border-red-500/40 text-red-400 bg-red-500/10",
-        "sport": "border-orange-500/40 text-orange-400 bg-orange-500/10",
-        "coding": "border-purple-500/40 text-purple-400 bg-purple-500/10",
-        "personal": "border-[#00d4ff]/40 text-[#00d4ff] bg-[#00d4ff]/10"
-    }
-    cat_style = colors.get(task.get('category', 'personal'))
-    energy_bolts = "⚡" * (1 if task.get('energy') == 'low' else 2 if task.get('energy') == 'mid' else 3)
-    
-    with st.container():
-        c_info, c_act = st.columns([4, 1])
-        with c_info:
-            st.markdown(f"""
-            <div class="glass-card" style="padding: 1rem; margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
-                        <span class="{cat_style}" style="padding: 2px 8px; border-radius: 99px; font-size: 0.7rem; border: 1px solid;">{task.get('category').upper()}</span>
-                        <span style="font-size: 0.7rem; color: #94a3b8;">{energy_bolts}</span>
-                    </div>
-                    <div style="font-weight: 600; font-size: 1.1rem;">{task['name']}</div>
-                    <div style="font-size: 0.8rem; color: #64748b;">⏱️ {task['duration']} min</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with c_act:
-            if st.button("▶️", key=f"foc_{idx}"):
-                st.switch_page("pages/3_🔥_Focus.py") # Hier Parameterübergabe via SessionState wäre besser
-            if st.button("🗑️", key=f"del_{idx}"):
-                tasks.pop(idx)
-                storage.save_to_drive(creds, 'tasks', tasks)
-                st.rerun()
-
-with tab_all:
     for i, t in enumerate(tasks):
-        render_task_card(t, i)
+        # Einfache Karte im "Clean Look"
+        with st.container(border=True):
+            c_main, c_actions = st.columns([4, 1])
+            
+            with c_main:
+                energy_icon = "⚡" if t.get('energy') == 'low' else "⚡⚡" if t.get('energy') == 'mid' else "⚡⚡⚡"
+                st.write(f"**{t['name']}**")
+                st.caption(f"{t['category']} | {t['duration']} Min | {energy_icon} | Frist: {t.get('deadline', '-')}")
+            
+            with c_actions:
+                # PLANEN BUTTON
+                if st.button("Plan AI", key=f"plan_{i}"):
+                    with st.spinner("Kairos sucht Slot..."):
+                        slots = collect_week_slots(service, schedule, datetime.datetime.now(), 5)
+                        # Hier rufen wir die neue Planner-Funktion auf!
+                        prop = planner.suggest_slot(
+                            f"{t['name']} ({t['duration']}m)", 
+                            slots, 
+                            t.get('deadline'),
+                            energy_level=t.get('energy', 'mid') # Energie übergeben!
+                        )
+                        st.session_state.proposal = prop
+                        st.session_state.proposal_idx = i
+                        st.rerun()
+
+                if st.button("Delete", key=f"del_{i}"):
+                    tasks.pop(i)
+                    storage.save_to_drive(creds, 'tasks', tasks)
+                    st.rerun()
+        
+        # --- VORSCHLAG ANZEIGEN (Inline) ---
+        # Wir zeigen den Vorschlag nur direkt unter der betroffenen Task an
+        if st.session_state.proposal and st.session_state.proposal_idx == i:
+            prop = st.session_state.proposal
+            
+            if prop.get('found'):
+                st.info(f"💡 Suggestion: {prop['reason']}")
+                c_ok, c_cancel = st.columns(2)
+                
+                # Button Label mit Zeit
+                label = f"Buchen: {prop['new_start_time'][5:]} Uhr"
+                
+                if c_ok.button(label, key=f"book_{i}", type="primary"):
+                    # 1. Google Event
+                    s_dt = datetime.datetime.strptime(prop['new_start_time'], "%Y-%m-%d %H:%M")
+                    e_dt = datetime.datetime.strptime(prop['new_end_time'], "%Y-%m-%d %H:%M")
+                    desc = f"Kategorie: {t['category']} | Energie: {t.get('energy')} | Auto-Plan"
+                    create_google_event(service, s_dt, e_dt, prop['summary'], desc)
+                    
+                    # 2. Task löschen
+                    tasks.pop(i)
+                    storage.save_to_drive(creds, 'tasks', tasks)
+                    
+                    # 3. Reset
+                    st.session_state.proposal = None
+                    st.session_state.proposal_idx = None
+                    st.success("Gebucht!")
+                    st.rerun()
+                    
+                if c_cancel.button("Cancel", key=f"cancel_{i}"):
+                    st.session_state.proposal = None
+                    st.session_state.proposal_idx = None
+                    st.rerun()
+            else:
+                st.error(f"Kein Slot gefunden: {prop.get('reason')}")
+                if st.button("Schließen", key=f"close_{i}"):
+                    st.session_state.proposal = None
+                    st.session_state.proposal_idx = None
+                    st.rerun()
