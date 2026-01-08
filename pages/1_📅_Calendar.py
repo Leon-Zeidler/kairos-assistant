@@ -177,7 +177,13 @@ t_max = (search_dt + datetime.timedelta(days=7)).isoformat() + 'Z'
 raw_events = service.events().list(calendarId='primary', timeMin=t_min, timeMax=t_max, singleEvents=True).execute().get('items', [])
 
 cal_events = []
-COLORS = cal_settings['colors']
+COLORS = {
+    'school': '#475569',    # Slate Grey
+    'sport': '#52525b',     # Zinc Grey
+    'coding': '#000000',    # Deep Black (mit weißem Border)
+    'personal': '#27272a',  # Dark Grey
+    'ai_planned': '#ababab' # Silver (Highlight)
+}
 
 for e in raw_events:
     title = e.get('summary', 'Event')
@@ -193,8 +199,8 @@ for e in raw_events:
         "title": title,
         "start": e['start'].get('dateTime', e['start'].get('date')),
         "end": e['end'].get('dateTime', e['end'].get('date')),
-        "backgroundColor": COLORS.get(cat, COLORS['personal']),
-        "borderColor": "transparent",
+        "backgroundColor": COLORS[cat],
+        "borderColor": "rgba(255,255,255,0.2)",
         "extendedProps": {"description": desc}
     })
 
@@ -207,89 +213,49 @@ for i in range(7):
             "title": e['summary'],
             "start": e['start']['dateTime'],
             "end": e['end']['dateTime'],
-            "backgroundColor": COLORS['school'],
-            "borderColor": "transparent",
+            "backgroundColor": COLORS[cat],
+            "borderColor": "rgba(255,255,255,0.2)",
             "extendedProps": {"description": "School"}
         })
 
 # --- CLEAN CALENDAR CSS ---
 calendar_css = """
-    /* General Clean Up */
-    .fc-theme-standard td, .fc-theme-standard th {
-        border-color: rgba(255, 255, 255, 0.06) !important;
-    }
-    .fc-scrollgrid {
-        border: none !important;
+    /* Hintergrund Transparent für Beams */
+    .fc-view-harness {
+        background-color: rgba(0, 0, 0, 0.4) !important; 
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(171, 171, 171, 0.1);
+        border-radius: 12px;
     }
     
-    /* Header (Days) */
+    /* Grid Lines Subtil */
+    .fc-theme-standard td, .fc-theme-standard th { 
+        border-color: rgba(255,255,255,0.05) !important; 
+    }
+    .fc-scrollgrid { border: none !important; }
+
+    /* Header */
     .fc-col-header-cell {
-        background-color: transparent !important;
-        border: none !important;
-        padding-bottom: 10px !important;
+        background-color: rgba(255, 255, 255, 0.02) !important;
+        border-bottom: 1px solid rgba(255,255,255,0.1) !important;
     }
-    .fc-col-header-cell-cushion {
-        color: #94a3b8;
-        font-weight: 600;
-        text-transform: uppercase;
-        font-size: 0.8rem;
-        letter-spacing: 0.5px;
-        text-decoration: none !important;
-    }
-    
-    /* Timeslots */
-    .fc-timegrid-slot {
-        height: 50px !important; 
-        border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
-    }
-    .fc-timegrid-slot-label-cushion {
-        color: #64748b !important;
-        font-size: 0.75rem;
+    .fc-col-header-cell-cushion { 
+        color: #ababab !important; 
         font-family: monospace;
+        text-transform: uppercase;
     }
-    .fc-timegrid-axis {
-        border: none !important;
-    }
-    
-    /* Events */
+
+    /* Events: Silver / White / Grey Logic */
     .fc-event {
+        border: 1px solid rgba(255,255,255,0.1) !important;
         border-radius: 4px !important;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        padding: 2px 4px;
-        font-weight: 500;
-        font-size: 0.85rem;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.5);
     }
-    .fc-event:hover {
-        opacity: 0.9;
-    }
+    .fc-event-main { color: #fff !important; font-family: monospace; }
     
-    /* Red Line */
-    .fc-timegrid-now-indicator-line {
-        border-color: #ef4444; 
-        border-width: 1px;
-    }
-    .fc-timegrid-now-indicator-arrow {
-        border-color: #ef4444;
-        border-width: 5px;
-    }
-    
-    /* Buttons */
-    .fc-button-primary {
-        background-color: rgba(255,255,255,0.05) !important;
-        border: none !important;
-        color: white !important;
-        font-weight: 500 !important;
-        text-transform: capitalize !important;
-        border-radius: 6px !important;
-        padding: 0.4rem 1rem !important;
-    }
-    .fc-button-primary:hover {
-        background-color: rgba(255,255,255,0.1) !important;
-    }
-    .fc-button-active {
-        background-color: #ffffff !important;
-        color: black !important;
-    }
+    /* Current Time: Bright White */
+    .fc-timegrid-now-indicator-line { border-color: #fff !important; opacity: 0.8; }
+    .fc-timegrid-now-indicator-arrow { border-color: #fff !important; opacity: 0.8; }
 """
 
 # --- RENDER ---

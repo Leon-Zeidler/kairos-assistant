@@ -1,113 +1,208 @@
 import streamlit as st
-from streamlit_option_menu import option_menu
-from modules import auth, storage
 
 def load_css():
-    """Lädt das globale CSS"""
+    # 1. HTML/JS für den "Beams" Hintergrund (Portierung des React-Effekts)
+    beams_html = """
+    <div id="beams-container">
+        <canvas id="beams-canvas"></canvas>
+    </div>
+    <script>
+        const canvas = document.getElementById('beams-canvas');
+        const ctx = canvas.getContext('2d');
+        
+        let width, height;
+        let beams = [];
+        
+        // Configuration (Matches your React props)
+        const config = {
+            beamWidth: 2,
+            beamColor: 'rgba(171, 171, 171, 0.15)', // #ababab with low opacity
+            speed: 0.5,
+            count: 20
+        };
+
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
+            initBeams();
+        }
+
+        function initBeams() {
+            beams = [];
+            for (let i = 0; i < config.count; i++) {
+                beams.push({
+                    x: Math.random() * width,
+                    angle: (Math.random() - 0.5) * 0.5, // Slight angle
+                    speed: (Math.random() + 0.5) * config.speed,
+                    width: Math.random() * config.beamWidth + 1,
+                    alpha: Math.random()
+                });
+            }
+        }
+
+        function draw() {
+            // Clear with a slight trail effect
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.4)'; // Dark Slate Base
+            ctx.fillRect(0, 0, width, height);
+            
+            ctx.fillStyle = config.beamColor;
+            
+            beams.forEach(beam => {
+                ctx.save();
+                ctx.translate(beam.x, 0);
+                ctx.rotate(beam.angle);
+                
+                // Draw Beam (Long rectangle)
+                ctx.globalAlpha = beam.alpha * 0.5;
+                ctx.fillRect(0, -height/2, beam.width, height * 2);
+                
+                // Move
+                beam.x += beam.speed;
+                if (beam.x > width + 100) beam.x = -100;
+                
+                ctx.restore();
+            });
+            
+            requestAnimationFrame(draw);
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+        draw();
+    </script>
+    <style>
+        #beams-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: -1;
+            background-color: #000000; /* Fallback Black */
+            overflow: hidden;
+            pointer-events: none;
+        }
+    </style>
+    """
+    
+    # Inject Beams Background
+    st.components.v1.html(beams_html, height=0, width=0) # Hack to inject without layout shift
+    
+    # 2. CSS für das UI (Monochrome Theme)
     st.markdown("""
         <style>
-            [data-testid="stSidebarNav"] {display: none !important;}
-            section[data-testid="stSidebar"] {
-                background-color: #0f172a;
-                border-right: 1px solid rgba(255,255,255,0.05);
-            }
-            .nav-link {
-                border-radius: 8px !important;
-                margin-bottom: 5px !important;
-            }
-            .nav-link:hover {
-                background-color: rgba(255,255,255,0.05) !important;
-            }
-            .profile-box {
-                background: rgba(255,255,255,0.03);
-                border: 1px solid rgba(255,255,255,0.05);
-                border-radius: 12px;
-                padding: 15px;
-                margin-bottom: 20px;
-                text-align: center;
-            }
+        /* --- GLOBAL & BEAMS FIX --- */
+        .stApp {
+            background: transparent !important; /* Wichtig damit Canvas sichtbar ist */
+        }
+        iframe[title="streamlit_components_v1.html"] {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: -1;
+        }
+        
+        /* --- TYPOGRAPHY --- */
+        h1, h2, h3 {
+            font-family: 'Inter', sans-serif;
+            font-weight: 700;
+            color: #f8fafc !important;
+            text-shadow: 0 0 20px rgba(171, 171, 171, 0.3);
+        }
+        p, span, div {
+            color: #cbd5e1;
+        }
+        
+        /* --- SIDEBAR --- */
+        section[data-testid="stSidebar"] {
+            background-color: rgba(0, 0, 0, 0.6);
+            border-right: 1px solid rgba(255,255,255,0.08);
+            backdrop-filter: blur(20px);
+        }
+        
+        /* --- MODERN SILVER CARDS --- */
+        div.css-1r6slb0, .modern-card {
+            background: rgba(20, 20, 20, 0.6); /* Sehr dunkel */
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(171, 171, 171, 0.15); /* Silver Border */
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+            transition: all 0.3s ease;
+        }
+        .modern-card:hover {
+            border-color: rgba(171, 171, 171, 0.4);
+            box-shadow: 0 0 20px rgba(171, 171, 171, 0.1);
+            transform: translateY(-2px);
+        }
+
+        /* --- METRICS (Monochrome) --- */
+        .metric-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #94a3b8;
+            margin-bottom: 8px;
+        }
+        .metric-value {
+            font-size: 2rem;
+            font-weight: 300;
+            color: #ffffff;
+            font-family: monospace;
+        }
+        .metric-delta {
+            font-size: 0.8rem;
+            margin-top: 8px;
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.05);
+            color: #ababab;
+        }
+        
+        /* --- BUTTONS (Silver) --- */
+        .stButton button {
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+        .stButton button:hover {
+            background: #ababab;
+            color: #000;
+            border-color: #ababab;
+            box-shadow: 0 0 15px rgba(171, 171, 171, 0.5);
+        }
+        
+        /* --- INPUTS --- */
+        .stTextInput input, .stTextArea textarea, .stSelectbox div[data-baseweb="select"] {
+            background-color: rgba(0,0,0,0.5) !important;
+            border: 1px solid rgba(255,255,255,0.1) !important;
+            color: white !important;
+        }
         </style>
     """, unsafe_allow_html=True)
 
-def card(title, value, desc, icon):
+def card(title, value, delta="", icon=""):
+    # Monochrome Design
     return f"""
-    <div style="background-color: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; padding: 20px; height: 100%;">
-        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
-            <span style="color: #94a3b8; font-size: 0.85rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px;">{title}</span>
-            <span style="background: rgba(255,255,255,0.05); padding: 6px; border-radius: 8px; font-size: 1.1rem; line-height: 1;">{icon}</span>
+    <div class="modern-card">
+        <div style="display: flex; justify-content: space-between; align-items: start;">
+            <div>
+                <div class="metric-label">{title}</div>
+                <div class="metric-value">{value}</div>
+                <div class="metric-delta">{delta}</div>
+            </div>
+            <div style="font-size: 1.5rem; opacity: 0.5; color: #ababab;">
+                {icon}
+            </div>
         </div>
-        <div style="font-size: 1.8rem; font-weight: 700; color: white; margin-bottom: 5px;">{value}</div>
-        <div style="color: #64748b; font-size: 0.8rem;">{desc}</div>
     </div>
     """
-
-def render_sidebar(active_page="Dashboard"):
-    load_css()
-    
-    with st.sidebar:
-        st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
-        
-        c1, c2, c3 = st.columns([1,2,1])
-        with c2:
-            st.image("https://cdn-icons-png.flaticon.com/512/3652/3652191.png", width=60)
-        
-        st.markdown("""
-            <h3 style='text-align: center; margin-bottom: 0; color: white;'>Kairos OS</h3>
-            <p style='text-align: center; color: #64748b; font-size: 0.8rem; margin-top: -5px;'>Personal Intelligence</p>
-        """, unsafe_allow_html=True)
-        st.markdown("---")
-
-        st.markdown("""
-        <div class="profile-box">
-            <div style="font-weight: bold; color: white;">Commander</div>
-            <div style="font-size: 0.75rem; color: #10b981;">● Systems Online</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # HIER LIEGT DAS GEHEIMNIS: 
-        # Die Dateinamen rechts müssen exakt so existieren wie im Ordner pages/
-        page_map = {
-            "Dashboard": "app.py",
-            "Calendar": "pages/1_📅_Calendar.py",   # <--- Geändert zu Calendar (Englisch)
-            "Tasks": "pages/2_📝_Tasks.py",         # <--- Geändert zu Tasks
-            "Focus": "pages/3_🔥_Focus.py",         # <--- Geändert zu Focus (mit c)
-            "Chat": "pages/4_💬_Chat.py",
-            "Settings": "pages/5_⚙️_Settings.py",
-            "Vault": "pages/6_🧠_Vault.py",
-            "Inbox": "pages/7_📧_Inbox.py"
-        }
-
-        selected = option_menu(
-            menu_title=None,
-            options=list(page_map.keys()),
-            icons=["speedometer2", "calendar-week", "list-check", "bullseye", "chat-dots", "gear", "archive", "inbox"],
-            default_index=list(page_map.keys()).index(active_page),
-            styles={
-                "container": {"padding": "0!important", "background-color": "transparent"},
-                "icon": {"color": "#94a3b8", "font-size": "16px"}, 
-                "nav-link": {"font-size": "14px", "text-align": "left", "margin":"5px", "--hover-color": "#1e293b"},
-                "nav-link-selected": {"background-color": "#2563eb", "color": "white", "font-weight": "600"},
-            }
-        )
-        
-        # WEITERLEITUNG
-        if selected != active_page:
-            st.switch_page(page_map[selected])
-
-        st.markdown("---")
-        
-        try:
-            creds = auth.get_creds()
-            tasks = storage.load_from_drive(creds, 'tasks', [])
-            open_count = len([t for t in tasks if t.get('status') != 'completed'])
-        except:
-            open_count = 0
-            
-        st.markdown(f"""
-        <div style='display: flex; justify-content: space-between; align-items: center; color: #94a3b8; font-size: 0.8rem; padding: 0 10px;'>
-            <span>Active Missions</span>
-            <span style='background: #3b82f6; color: white; padding: 2px 8px; border-radius: 10px; font-size: 0.7rem;'>{open_count}</span>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        return selected
